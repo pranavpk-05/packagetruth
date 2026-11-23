@@ -15,7 +15,7 @@ export function artifactDigests(artifact: Buffer): ArtifactDigests {
 }
 
 export function verifyIntegrity(digests: ArtifactDigests, published: string | null, legacy?: unknown): Check {
-  if (!published) {
+  if (published === null) {
     if (typeof legacy !== 'string' || !/^[a-f0-9]{40}$/i.test(legacy)) {
       return { status: 'absent', detail: 'npm did not publish an integrity value or supported legacy checksum.' };
     }
@@ -49,9 +49,17 @@ export async function verifyRegistrySignature(
   if (signatures === undefined || (Array.isArray(signatures) && !signatures.length)) {
     return { status: 'absent', detail: 'The npm release metadata contains no registry signature.' };
   }
-  if (!Array.isArray(signatures) || signatures.length > 16 || !integrity) {
-    return { status: 'unsupported', detail: 'The signature metadata is malformed or lacks a signed integrity value.' };
+  if (!Array.isArray(signatures) || signatures.length > 16) {
+    return { status: 'failed', detail: 'The advertised npm signature list is malformed.' };
   }
+  const entries = signatures.map(record);
+  if (entries.some(entry => typeof entry.keyid !== 'string' || entry.keyid.length === 0 || entry.keyid.length > 128 ||
+      /[^\x21-\x7e]/.test(entry.keyid) ||
+      typeof entry.sig !== 'string' || !/^[A-Za-z0-9+/]{1,128}={0,2}$/.test(entry.sig) ||
+      Buffer.from(entry.sig, 'base64').toString('base64') !== entry.sig)) {
+    return { status: 'failed', detail: 'The advertised npm signature is malformed.' };
+  }
+  if (!integrity) return { status: 'unsupported', detail: 'npm did not publish a signed integrity value.' };
   let keys: unknown;
   try {
     keys = record(await readJson(transport, registryKeysUrl)).keys;
@@ -61,27 +69,40 @@ export async function verifyRegistrySignature(
   if (!Array.isArray(keys) || keys.length > 64) {
     return { status: 'not-tested', detail: 'The npm key response has an unsupported shape.' };
   }
-  let attempted = false;
-  for (const item of signatures) {
-    const entry = record(item);
-    if (typeof entry.keyid !== 'string' || typeof entry.sig !== 'string' ||
-        !/^[A-Za-z0-9+/]{1,128}={0,2}$/.test(entry.sig)) continue;
-    const key = keys.map(record).find(candidate => candidate.keyid === entry.keyid);
-    if (!key || key.scheme !== 'ecdsa-sha2-nistp256' || key.keytype !== 'ecdsa-sha2-nistp256' ||
-        typeof key.key !== 'string' || key.key.length > 256) continue;
-    if (key.expires !== null && (typeof key.expires !== 'string' || !(Date.parse(key.expires) > Date.now()))) continue;
+  const trustedKeys = keys.map(record);
+  let matchedKey: string | undefined;
+  let invalidKey = false;
+  for (const { keyid, sig } of entries as { keyid: string; sig: string }[]) {
+    const matching = trustedKeys.filter(candidate => candidate.keyid === keyid);
+    if (matching.length === 0) continue;
+    const [key] = matching;
+    if (matching.length !== 1) { invalidKey = true; continue; }
+    if (key.scheme !== 'ecdsa-sha2-nistp256' || key.keytype !== 'ecdsa-sha2-nistp256') continue;
+    const expiry = key.expires === null ? Infinity : typeof key.expires === 'string' ? Date.parse(key.expires) : NaN;
+    if (Number.isNaN(expiry) || typeof key.key !== 'string' || key.key.length > 256) { invalidKey = true; continue; }
+    if (expiry <= Date.now()) continue;
+    let publicKey;
     try {
-      const publicKey = createPublicKey({ key: Buffer.from(key.key, 'base64'), type: 'spki', format: 'der' });
-      if (publicKey.asymmetricKeyType !== 'ec' || publicKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') continue;
-      attempted = true;
-      if (verify('sha256', Buffer.from(`${name}@${version}:${integrity}`), publicKey, Buffer.from(entry.sig, 'base64'))) {
-        return { status: 'verified', detail: `ECDSA P-256 registry signature matched npm key ${entry.keyid.slice(0, 100)}.` };
-      }
+      publicKey = createPublicKey({ key: Buffer.from(key.key, 'base64'), type: 'spki', format: 'der' });
     } catch {
+      invalidKey = true;
       continue;
     }
+    if (publicKey.asymmetricKeyType !== 'ec' || publicKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
+      invalidKey = true;
+      continue;
+    }
+    try {
+      if (verify('sha256', Buffer.from(`${name}@${version}:${integrity}`), publicKey, Buffer.from(sig, 'base64'))) {
+        matchedKey ??= keyid;
+        continue;
+      }
+    } catch {
+      // A matching key was available, so a verification error is a failed check.
+    }
+    return { status: 'failed', detail: 'An advertised signature failed verification with an applicable npm key.' };
   }
-  return attempted
-    ? { status: 'failed', detail: 'No signature matched the signed release tuple with the applicable npm key.' }
-    : { status: 'unsupported', detail: 'No supported, currently valid npm signing key matched this release.' };
+  if (invalidKey) return { status: 'not-tested', detail: 'A matching npm signing key could not be validated.' };
+  if (matchedKey) return { status: 'verified', detail: `ECDSA P-256 registry signature matched npm key ${matchedKey}.` };
+  return { status: 'unsupported', detail: 'No supported, currently valid npm signing key matched this release.' };
 }

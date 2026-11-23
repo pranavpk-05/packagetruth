@@ -7,6 +7,8 @@ import { DownloadLink, Pager, pageNumber, releaseLabel } from '@/components/repo
 import type { ArtifactFile, Manifest } from '@packagetruth/shared';
 import { displayEvidence } from '@packagetruth/shared';
 
+import { assertLocalPage } from '@/lib/local-page';
+
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Artifact evidence' };
 
@@ -17,6 +19,7 @@ function manifestText(manifest: Manifest) {
 export default async function EvidenceDetail({ params, searchParams }: {
   params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
+  await assertLocalPage();
   const { id } = await params;
   const report = getReport(id);
   if (!report) notFound();
@@ -70,7 +73,7 @@ export default async function EvidenceDetail({ params, searchParams }: {
       {!filtered.length ? <p className="inline-empty">{query ? 'No files match the filter.' : 'No file evidence is available for this view.'}</p> :
         <ul className="file-list">{filtered.slice((page - 1) * 30, page * 30).map(({ file, change, beforeHash }) =>
           <li key={file.path}><details><summary>
-            <code>{file.path}</code><span>{change ?? (file.executable ? 'Executable' : '')}</span><span>{file.size.toLocaleString('en-US')} B</span>
+            <code>{displayEvidence(file.path)}</code><span>{change ?? (file.executable ? 'Executable' : '')}</span><span>{file.size.toLocaleString('en-US')} B</span>
           </summary><p>SHA-256 <code>{file.sha256}</code></p>{beforeHash && <p>Baseline SHA-256 <code>{beforeHash}</code></p>}</details></li>)}</ul>}
       <Pager path={path} pages={pages} page={page} query={{ view, q: query }} />
     </section>

@@ -7,7 +7,7 @@ import { limits } from './registry.js';
 import { finding } from './rules.js';
 
 const block = 512;
-const utf8 = new TextDecoder('utf-8', { fatal: true });
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 function invalid(detail: string): never {
   throw new ScanError('ARCHIVE', detail);
 }
@@ -31,7 +31,7 @@ function entryPath(header: Buffer, directory: boolean, roots: Set<string>): stri
   const full = directory && joined.endsWith('/') ? joined.slice(0, -1) : joined;
   const parts = full.split('/');
   if (!roots.has(parts[0]) || (parts.length === 1 && !directory) || full.length > 512 ||
-      /[\\:\x00-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/u.test(full) ||
+      /[\\:\x00-\x1f\x7f-\x9f\u061c\u200e-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/u.test(full) ||
       parts.some(part => !part || part === '.' || part === '..')) {
     invalid('An archive path is outside the accepted package directory or uses unsafe characters.');
   }
@@ -109,6 +109,7 @@ export async function inspectArchive(artifact: Buffer, packageName: string): Pro
         await read(block, requireZeros);
         requireZeros(chunk);
         while (await nextChunk()) requireZeros(chunk);
+        if (expanded % block !== 0) invalid('The archive ends outside a complete tar block.');
         break;
       }
       if (++entries > limits.files) throw new ScanError('LIMIT', 'The archive exceeds the entry limit.');

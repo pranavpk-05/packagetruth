@@ -2,9 +2,12 @@ import { Heading } from '@/components/heading';
 import { PolicyForm } from '@/components/policy-form';
 import { getPolicy } from '@/lib/db';
 
+import { assertLocalPage } from '@/lib/local-page';
+
 export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Security policies' };
-export default function PolicyPage() {
+export default async function PolicyPage() {
+  await assertLocalPage();
   return <><Heading label="SECURITY POLICIES" title="Configure review policy"
     description="Highlight reports that contain a finding at or above your local severity threshold." />
     <PolicyForm initial={getPolicy()} />

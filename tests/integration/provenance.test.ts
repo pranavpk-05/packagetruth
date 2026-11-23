@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createScanner, ScanError } from '@packagetruth/scanner';
-import { verifyBundle } from '../../packages/scanner/src/provenance-bundle';
+import { reviewedTrustRoot, verifyBundle } from '../../packages/scanner/src/provenance-bundle';
 import { verifyGithubIdentity } from '../../packages/scanner/src/provenance-identity';
 import { record } from '../../packages/scanner/src/input';
 
@@ -19,7 +19,8 @@ type FixtureBundle = Record<string, unknown> & {
   dsseEnvelope: { payload: string; signatures: { sig: string }[] };
   verificationMaterial: {
     certificate: { rawBytes: string };
-    tlogEntries: { inclusionProof?: { hashes: string[] }; canonicalizedBody: string;
+    tlogEntries: { inclusionProof?: { hashes: string[]; treeSize: string; rootHash: string; checkpoint: { envelope: string } };
+      canonicalizedBody: string; integratedTime: string; inclusionPromise?: { signedEntryTimestamp: string };
       kindVersion: { kind: string; version: string } }[];
   };
 };
@@ -122,6 +123,47 @@ describe('npm provenance against a captured signed release', () => {
     expect((await fixture({ response: body }).inspect()).checks.provenance.status).toBe('failed');
   });
 
+  it.each(['treeSize', 'rootHash'] as const)('rejects an altered %s even with an authentic checkpoint', async field => {
+    const body = mutate(bundle => {
+      const proof = bundle.verificationMaterial.tlogEntries[0].inclusionProof!;
+      proof[field] = field === 'treeSize' ? String(Number(proof.treeSize) + 1) : Buffer.alloc(32).toString('base64');
+    });
+    expect((await fixture({ response: body }).inspect()).checks.provenance)
+      .toMatchObject({ status: 'failed', detail: expect.stringContaining('disagrees with its checkpoint') });
+  });
+
+  it('rejects a damaged checkpoint signature even when its tree fields match', async () => {
+    const body = mutate(bundle => {
+      const checkpoint = bundle.verificationMaterial.tlogEntries[0].inclusionProof!.checkpoint;
+      const lines = checkpoint.envelope.split('\n');
+      const position = lines.findIndex(line => line.startsWith('\u2014 '));
+      const entry = lines[position].split(' ');
+      const signature = Buffer.from(entry[2], 'base64');
+      signature[signature.length - 1] ^= 1;
+      entry[2] = signature.toString('base64');
+      lines[position] = entry.join(' ');
+      checkpoint.envelope = lines.join('\n');
+    });
+    expect((await fixture({ response: body }).inspect()).checks.provenance.status).toBe('failed');
+  });
+
+  it('fails closed when a signed-entry time is changed to after the leaf certificate expired', async () => {
+    const body = mutate(bundle => {
+      bundle.verificationMaterial.tlogEntries[0].integratedTime = String(Date.parse('2026-01-01T00:00:00Z') / 1000);
+    });
+    const entries = JSON.parse(body.toString('utf8')).attestations as { predicateType: string; bundle: FixtureBundle }[];
+    expect(() => verifyBundle(entries.find(entry => entry.predicateType === predicate)!.bundle))
+      .toThrow(/certificate chain/i);
+    const { checks } = await fixture({ response: body }).inspect();
+    expect(checks.provenance.status).toBe('failed');
+    expect(checks.provenance.evidence).toBeUndefined();
+  });
+
+  it('rejects a proof-only bundle without an authenticated signing time', async () => {
+    const body = mutate(bundle => { delete bundle.verificationMaterial.tlogEntries[0].inclusionPromise; });
+    expect((await fixture({ response: body }).inspect()).checks.provenance.status).toBe('failed');
+  });
+
   it('rejects a bundle with no inclusion proof even if its signed entry timestamp is present', async () => {
     const body = mutate(bundle => { delete bundle.verificationMaterial.tlogEntries[0].inclusionProof; });
     const result = await fixture({ response: body }).inspect();
@@ -194,6 +236,15 @@ describe('npm provenance against a captured signed release', () => {
     expect((await fixture().inspect()).checks.provenance).toMatchObject({
       status: 'not-tested', detail: expect.stringContaining('past its review deadline'),
     });
+  });
+
+  it('rejects malformed or modified trust metadata as incomplete', () => {
+    const root: Record<string, unknown> = JSON.parse(readFileSync(
+      new URL('../../packages/scanner/src/sigstore-trusted-root.json', import.meta.url), 'utf8'));
+    expect(() => reviewedTrustRoot(root)).not.toThrow();
+    for (const bad of [null, {}, { ...root, certificateAuthorities: [] }]) {
+      expect(() => reviewedTrustRoot(bad)).toThrow(expect.objectContaining({ status: 'not-tested' }));
+    }
   });
 
   it('rejects source, commit, caller workflow or issuer claims that disagree with a verified certificate', () => {

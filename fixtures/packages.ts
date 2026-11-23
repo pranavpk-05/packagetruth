@@ -3,7 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { createScanner } from '@packagetruth/scanner';
 
 export const fixtureName = 'pt-fixture';
-export interface FixtureEntry { path: string; data?: Buffer | string; mode?: number; type?: '0' | '2' | '5' }
+export interface FixtureEntry { path: string; data?: Buffer | string; mode?: number; type?: '0' | '1' | '2' | '5' | 'S' }
 
 export function fixtureTar(entries: FixtureEntry[]): Buffer {
   const chunks: Buffer[] = [];
@@ -49,13 +49,14 @@ const fixtureKey = createPrivateKey({ format: 'der', type: 'sec1',
   key: Buffer.concat([Buffer.from('30310201010420', 'hex'), keyBytes, Buffer.from('a00a06082a8648ce3d030107', 'hex')]) });
 
 export function fixtureScanner(options: { corrupt?: boolean; badSignature?: boolean; attestations?: boolean;
-  tarball?: string; integrity?: string; archive?: Buffer; signatures?: boolean } = {}) {
+  tarball?: string; integrity?: string; archive?: Buffer; signatures?: boolean;
+  additionalSignature?: 'invalid' | 'malformed'; keyExpires?: string; malformedKey?: boolean } = {}) {
   return createScanner(async (url, limit) => {
     const version = url.split('/').at(-1)?.replace(/^pt-fixture-/, '').replace(/\.tgz$/, '');
     const archive = options.archive ?? releases[version as keyof typeof releases];
     if (url.endsWith('/keys')) return Buffer.from(JSON.stringify({ keys: [{
-      keyid: 'test-key', expires: null, keytype: 'ecdsa-sha2-nistp256', scheme: 'ecdsa-sha2-nistp256',
-      key: createPublicKey(fixtureKey).export({ format: 'der', type: 'spki' }).toString('base64'),
+      keyid: 'test-key', expires: options.keyExpires ?? null, keytype: 'ecdsa-sha2-nistp256', scheme: 'ecdsa-sha2-nistp256',
+      key: options.malformedKey ? 'invalid' : createPublicKey(fixtureKey).export({ format: 'der', type: 'spki' }).toString('base64'),
     }] }));
     if (!archive || !version) throw new Error('Fixture not found');
     if (url.endsWith('.tgz')) {
@@ -64,9 +65,14 @@ export function fixtureScanner(options: { corrupt?: boolean; badSignature?: bool
     }
     const integrity = options.integrity ?? `sha512-${createHash('sha512').update(archive).digest('base64')}`;
     const payload = options.badSignature ? 'different release tuple' : `${fixtureName}@${version}:${integrity}`;
+    const signatures = [{ keyid: 'test-key', sig: sign('sha256', Buffer.from(payload), fixtureKey).toString('base64') }];
+    if (options.additionalSignature) {
+      signatures.push({ keyid: 'test-key', sig: options.additionalSignature === 'malformed' ? '???'
+        : sign('sha256', Buffer.from('different release tuple'), fixtureKey).toString('base64') });
+    }
     return Buffer.from(JSON.stringify({ name: fixtureName, version, dist: {
       integrity, tarball: options.tarball ?? `https://registry.npmjs.org/${fixtureName}/-/${fixtureName}-${version}.tgz`,
-      signatures: options.signatures === false ? undefined : [{ keyid: 'test-key', sig: sign('sha256', Buffer.from(payload), fixtureKey).toString('base64') }],
+      signatures: options.signatures === false ? undefined : signatures,
       attestations: options.attestations ? { url: 'https://example.invalid/attestations' } : undefined,
     } }));
   });

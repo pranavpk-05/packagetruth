@@ -4,7 +4,7 @@ import { inspectArchive } from './archive.js';
 import { record, ScanError, validateName, validateVersion } from './input.js';
 import { parseManifest } from './manifest.js';
 import { pendingProvenance, verifyProvenance } from './provenance.js';
-import { artifactUrl, download, limits, metadataUrl, readJson } from './registry.js';
+import { artifactUrl, download, limits, metadataUrl, readBounded, readJson } from './registry.js';
 import type { Transport } from './registry.js';
 import { finding, lifecycle } from './rules.js';
 import { artifactDigests, verifyIntegrity, verifyRegistrySignature } from './verify.js';
@@ -38,10 +38,12 @@ export function createScanner(transport: Transport = download) {
     }
     const dist = record(metadata.dist);
     const url = artifactUrl(dist.tarball, name, version);
-    const artifact = await transport(url, limits.compressed);
+    const artifact = await readBounded(transport, url, limits.compressed);
     const published = typeof dist.integrity === 'string' ? dist.integrity : null;
     const digests = artifactDigests(artifact);
-    const integrity = verifyIntegrity(digests, published, dist.shasum);
+    const integrity: Check = dist.integrity !== undefined && published === null
+      ? { status: 'unsupported', detail: 'The published npm integrity field is malformed.' }
+      : verifyIntegrity(digests, published, dist.shasum);
     const checks: ScanReport['checks'] = {
       integrity, registrySignature: skipped, provenance: pendingProvenance(dist.attestations), archive: skipped,
       manifest: { status: 'not-tested', detail: 'Manifest validation requires a completed archive inspection.' },
@@ -49,7 +51,8 @@ export function createScanner(transport: Transport = download) {
     const report: ScanReport = {
       schemaVersion: 1, kind: 'scan', package: name, version, startedAt, completedAt: startedAt,
       artifact: { url, bytes: artifact.length, sha256: digests.sha256, digests,
-        expectedIntegrity: published?.slice(0, 4096) ?? (typeof dist.shasum === 'string' && /^[a-f0-9]{40}$/i.test(dist.shasum) ? `sha1-hex:${dist.shasum}` : null) },
+        expectedIntegrity: published?.slice(0, 4096) ?? (dist.integrity === undefined &&
+          typeof dist.shasum === 'string' && /^[a-f0-9]{40}$/i.test(dist.shasum) ? `sha1-hex:${dist.shasum}` : null) },
       checks, manifest: null, files: [], findings: [], limitations,
     };
     if (integrity.status !== 'verified') {

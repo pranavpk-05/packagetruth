@@ -2,7 +2,7 @@ import type { ArtifactDigests, ProvenanceCheck } from '@packagetruth/shared';
 import { record, ScanError } from './input.js';
 import { parseAttestationJson, ProvenanceError, trustRootId, verifyBundle } from './provenance-bundle.js';
 import { githubBuildType, verifyGithubIdentity } from './provenance-identity.js';
-import { attestationUrl, limits } from './registry.js';
+import { attestationUrl, limits, readBounded } from './registry.js';
 import type { Transport } from './registry.js';
 
 const slsaV1 = 'https://slsa.dev/provenance/v1';
@@ -23,8 +23,7 @@ export async function verifyProvenance(
   if (!url) return { status: 'failed', detail: 'The advertised attestation URL does not identify the exact public npm release.' };
   let bytes: Buffer;
   try {
-    bytes = await transport(url, limits.attestations);
-    if (bytes.length > limits.attestations) throw new ScanError('LIMIT', 'Attestation response too large.');
+    bytes = await readBounded(transport, url, limits.attestations);
   } catch (error) {
     return { status: 'not-tested', detail: error instanceof ScanError && error.code === 'LIMIT'
       ? 'The npm attestation response exceeded its download limit.'

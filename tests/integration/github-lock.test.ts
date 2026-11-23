@@ -37,3 +37,35 @@ it('rejects unexpected Git blob content', async () => {
   await expect(readPrLock('owner/repo', commitSha, transport('100644', bytes.length, Buffer.alloc(bytes.length))))
     .rejects.toThrow(/did not match/);
 });
+
+it('rejects a malformed repository or commit before issuing requests', async () => {
+  const request = transport();
+  for (const [repo, ref] of [['owner/repo\n', commitSha], ['owner/repo', commitSha + '\n']]) {
+    await expect(readPrLock(repo, ref, request)).rejects.toThrow(/Invalid pull request/);
+  }
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('requires a unique regular lockfile and rejects ambiguous tree entries', async () => {
+  const entry = { path: 'package-lock.json', type: 'blob', mode: '100644', size: bytes.length, sha };
+  const request = transport();
+  request.mockImplementationOnce(async () => Response.json({ sha: commitSha, tree: { sha: treeSha } }));
+  request.mockImplementationOnce(async () => Response.json({ sha: treeSha, truncated: false, tree: [entry, entry] }));
+  await expect(readPrLock('owner/repo', commitSha, request)).rejects.toThrow(/absent, oversized or unsupported/);
+  expect(request).toHaveBeenCalledTimes(2);
+});
+
+it('rejects malformed GitHub blob encoding while accepting normal folded base64', async () => {
+  for (const malformed of [false, true]) {
+    const request = transport();
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async url => {
+      if (!url.endsWith(sha)) return original(url);
+      const base64 = bytes.toString('base64');
+      const content = base64.slice(0, 8) + (malformed ? '!' : '\n') + base64.slice(8);
+      return Response.json({ sha, size: bytes.length, encoding: 'base64', content });
+    });
+    if (malformed) await expect(readPrLock('owner/repo', commitSha, request)).rejects.toThrow(/malformed blob encoding/);
+    else expect(await readPrLock('owner/repo', commitSha, request)).toEqual(bytes);
+  }
+});

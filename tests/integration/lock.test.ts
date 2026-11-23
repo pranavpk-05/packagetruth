@@ -61,3 +61,13 @@ it('records nonregistry resolutions without scanning them', async () => {
   expect(result.policyFailed).toBe(false);
   expect(result.results[0].detail).toMatch(/outside supported/);
 });
+
+it.each(['link', 'inBundle'])('treats a changed %s resolution as incomplete even if registry fields are unchanged', async flag => {
+  const key = 'node_modules/' + fixtureName;
+  const old = await lock('base.json', { [key]: release });
+  const current = await lock('head.json', { [key]: { ...release, [flag]: true } });
+  const scan = vi.fn(fixtureScanner().scan);
+  const result = await checkLock(old, current, 'critical', scan);
+  expect(scan).not.toHaveBeenCalled();
+  expect(result.results).toMatchObject([{ status: 'incomplete', detail: expect.stringContaining('Linked and bundled') }]);
+});

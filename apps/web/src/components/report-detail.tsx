@@ -92,7 +92,7 @@ export function ReportDetail({ id, report, threshold, filter, requestedPage }: {
         <ul className="findings">{filtered.slice((page - 1) * 20, page * 20).map((item, index) =>
           <li key={`${item.ruleId}:${item.path}:${index}`}>
             <div className="finding-label"><span className={`status severity-${item.severity}`}>{item.severity}</span><code>{item.ruleId}</code></div>
-            <code className="finding-path">{item.path}</code>
+            <code className="finding-path">{displayEvidence(item.path)}</code>
             <p>{item.explanation}</p>
             <pre dir="ltr">{displayEvidence(item.evidence)}</pre>
             <p className="review-action"><strong>Review action</strong> {item.action}</p>

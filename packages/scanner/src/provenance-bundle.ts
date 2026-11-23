@@ -1,4 +1,4 @@
-import { X509Certificate } from 'node:crypto';
+import { createHash, X509Certificate } from 'node:crypto';
 import {
   BUNDLE_V01_MEDIA_TYPE, BUNDLE_V02_MEDIA_TYPE, BUNDLE_V03_LEGACY_MEDIA_TYPE, BUNDLE_V03_MEDIA_TYPE,
   bundleFromJSON,
@@ -11,6 +11,7 @@ import root from './sigstore-trusted-root.json' with { type: 'json' };
 
 export const trustRootId = 'sigstore-public-tuf-targets-14';
 const reviewDeadline = Date.parse('2027-02-21T00:00:00Z');
+const reviewedRootDigest = '844a1c6de3986c9f02070266b25e0d1a2fa99ceccc89f6b9ad90aae47b62a16e';
 const mediaTypes = new Set([BUNDLE_V01_MEDIA_TYPE, BUNDLE_V02_MEDIA_TYPE, BUNDLE_V03_LEGACY_MEDIA_TYPE, BUNDLE_V03_MEDIA_TYPE]);
 const payloadType = 'application/vnd.in-toto+json';
 const decimal = /^(?:0|[1-9][0-9]{0,19})$/;
@@ -42,6 +43,14 @@ function base64(value: unknown, limit: number): Buffer {
 
 export function parseAttestationJson(bytes: Buffer): unknown {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes));
+}
+
+export function reviewedTrustRoot(metadata: unknown) {
+  const serialized = JSON.stringify(metadata);
+  if (!serialized || createHash('sha256').update(serialized).digest('hex') !== reviewedRootDigest) {
+    throw new ProvenanceError('not-tested', 'The bundled public Sigstore trust snapshot differs from the reviewed snapshot.');
+  }
+  return TrustedRoot.fromJSON(metadata);
 }
 
 function logCertificate(entry: Record<string, unknown>): Buffer {
@@ -95,21 +104,28 @@ function checkLogs(material: Record<string, unknown>, leaf: Buffer): void {
     const entry = record(value);
     const loggedCertificate = logCertificate(entry);
     const proof = record(entry.inclusionProof);
+    const checkpoint = record(proof.checkpoint).envelope;
     if (!isDecimal(entry.logIndex) || !isDecimal(entry.integratedTime) ||
         !isDecimal(proof.logIndex) || !isDecimal(proof.treeSize) ||
         !Array.isArray(proof.hashes) || proof.hashes.length > 64 ||
-        typeof record(proof.checkpoint).envelope !== 'string' ||
-        String(record(proof.checkpoint).envelope).length > 16 * 1024) {
+        typeof checkpoint !== 'string' || checkpoint.length > 16 * 1024) {
       invalid('The bundle has a missing or malformed transparency log inclusion proof.');
     }
     if (base64(record(entry.logId).keyId, 32).length !== 32) invalid('The transparency log identifier is malformed.');
     for (const hash of [proof.rootHash, ...proof.hashes]) {
       if (base64(hash, 32).length !== 32) invalid('The transparency log inclusion proof has an invalid hash.');
     }
+    // The Sigstore verifier authenticates the checkpoint. Require the duplicate
+    // fields in the bundle to describe that same tree.
+    const [, size, hash] = checkpoint.split('\n', 3);
+    if (proof.treeSize !== size || proof.rootHash !== hash || BigInt(proof.logIndex) >= BigInt(proof.treeSize)) {
+      invalid('The transparency log proof disagrees with its checkpoint.');
+    }
     if (entry.inclusionPromise !== undefined) {
       base64(record(entry.inclusionPromise).signedEntryTimestamp, 1024);
       const time = Number(entry.integratedTime) * 1000;
-      if (!Number.isSafeInteger(time) || time === 0 || time > Date.now() + 300_000) {
+      if (!Number.isSafeInteger(Number(entry.logIndex)) || !Number.isSafeInteger(time) ||
+          time === 0 || time > Date.now() + 300_000) {
         invalid('The transparency log timestamp is out of range.');
       }
     }
@@ -148,9 +164,10 @@ export function verifyBundle(bundle: Record<string, unknown>) {
     throw new ProvenanceError('not-tested', 'The bundled public Sigstore trust snapshot is past its review deadline.');
   }
   try {
-    verifier ??= new Verifier(toTrustMaterial(TrustedRoot.fromJSON(root)),
+    verifier ??= new Verifier(toTrustMaterial(reviewedTrustRoot(root)),
       { ctlogThreshold: 1, tlogThreshold: 1, timestampThreshold: 1 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ProvenanceError) throw error;
     throw new ProvenanceError('not-tested', 'The bundled public Sigstore trust snapshot could not be loaded.');
   }
 

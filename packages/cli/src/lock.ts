@@ -1,3 +1,4 @@
+import { constants } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { artifactUrl, scan, validateName, validateVersion, verifyIntegrity } from '@packagetruth/scanner';
 import type { Check, Finding, ScanReport, Severity } from '@packagetruth/shared';
@@ -6,12 +7,12 @@ import { meetsPolicy } from '@packagetruth/shared';
 const maxLockBytes = 4 * 1024 * 1024;
 const maxReleases = 12;
 const maxLocations = 200;
-type Entry = { name: string; version: string; resolved: string; integrity: string };
+type Entry = { name: string; version: string; resolved: string; integrity: string; mode: 'registry' | 'linked' | 'bundled' };
 type LockResult = { location: string; package: string; version: string; status: 'scanned' | 'incomplete';
   detail?: string; evidence?: string; lockIntegrity?: Check; finding?: Finding };
 
 async function readLock(path: string): Promise<Map<string, Entry>> {
-  const file = await open(path, 'r');
+  const file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   try {
     const stat = await file.stat();
     if (!stat.isFile() || stat.size > maxLockBytes) throw new Error('Lockfile must be a regular file of at most 4 MiB.');
@@ -23,7 +24,7 @@ async function readLock(path: string): Promise<Map<string, Entry>> {
       offset += result.bytesRead;
     }
     if (offset !== stat.size) throw new Error('Lockfile changed during inspection.');
-    const lock = JSON.parse(bytes.subarray(0, offset).toString('utf8'));
+    const lock = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, offset)));
     if (![2, 3].includes(lock?.lockfileVersion) || !lock.packages || typeof lock.packages !== 'object' || Array.isArray(lock.packages)) {
       throw new Error('A package-lock.json with lockfile version 2 or 3 is required.');
     }
@@ -33,8 +34,10 @@ async function readLock(path: string): Promise<Map<string, Entry>> {
       const entry = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
       const fromLocation = location.split('node_modules/').at(-1) ?? '';
       const string = (value: unknown) => typeof value === 'string' ? value : '';
+      const mode = entry.link !== undefined && entry.link !== false ? 'linked'
+        : entry.inBundle !== undefined && entry.inBundle !== false ? 'bundled' : 'registry';
       entries.set(location, { name: string(entry.name) || fromLocation,
-        version: string(entry.version), resolved: string(entry.resolved), integrity: string(entry.integrity) });
+        version: string(entry.version), resolved: string(entry.resolved), integrity: string(entry.integrity), mode });
     }
     return entries;
   } finally {
@@ -53,7 +56,7 @@ export async function checkLock(basePath: string, headPath: string, threshold: S
   for (const [location, entry] of after) {
     const old = before.get(location);
     if (old && old.name === entry.name && old.version === entry.version &&
-        old.resolved === entry.resolved && old.integrity === entry.integrity) continue;
+        old.resolved === entry.resolved && old.integrity === entry.integrity && old.mode === entry.mode) continue;
     if (results.length >= maxLocations) {
       incomplete = true;
       break;
@@ -66,6 +69,7 @@ export async function checkLock(basePath: string, headPath: string, threshold: S
     } catch {
       detail = 'Resolution does not identify a supported exact npm release.';
     }
+    if (entry.mode !== 'registry') detail = 'Linked and bundled dependencies have no independently verified registry resolution.';
     if (!detail) {
       try { artifactUrl(entry.resolved, entry.name, entry.version); }
       catch { detail = 'Resolution is outside supported public npm registry artifacts.'; }

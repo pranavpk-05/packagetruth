@@ -108,7 +108,7 @@ export function displayEvidence(value: string, multiline = false): string {
     const code = char.codePointAt(0)!;
     if (multiline && char === '\n') return char;
     if (code < 32 || (code >= 127 && code <= 159) || code === 0x061c || code === 0x200e || code === 0x200f ||
-        (code >= 0x2028 && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)) {
+        (code >= 0x2028 && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) || code === 0xfeff) {
       return '\\u' + code.toString(16).padStart(4, '0');
     }
     return char;

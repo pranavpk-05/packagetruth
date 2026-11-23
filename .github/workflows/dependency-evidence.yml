@@ -37,6 +37,11 @@ jobs:
       - name: Check changed npm releases
         shell: bash
         run: |
+          if [[ ! "$FAIL_ON" =~ ^(info|low|medium|high|critical|off)$ ||
+                ! "$FAIL_INCOMPLETE" =~ ^(true|false)$ ]]; then
+            echo "::error::PackageTruth dependency policy settings are invalid."
+            exit 2
+          fi
           work="$(mktemp -d "$RUNNER_TEMP/packagetruth.XXXXXX")"
           trap 'rm -r -- "$work"' EXIT
           export EVIDENCE_FILE="$RUNNER_TEMP/packagetruth-evidence.json"

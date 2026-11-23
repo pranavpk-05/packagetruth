@@ -1,8 +1,91 @@
 import { describe, expect, it } from 'vitest';
-import { gzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createScanner } from '@packagetruth/scanner';
+import { createHash } from 'node:crypto';
 import { fixtureName, fixtureScanner, makeRelease } from '../../fixtures/packages';
 
 describe('release inspection with deterministic npm responses', () => {
+  it.each(['invalid', 'malformed'] as const)('fails a %s registry signature even after a valid signature', async additionalSignature => {
+    const result = await fixtureScanner({ additionalSignature }).scan(fixtureName, '1.0.0');
+    expect(result.checks.registrySignature.status).toBe('failed');
+    expect(result.checks.archive.status).toBe('verified');
+  });
+
+  it('reports expired signing keys as unsupported and broken trust material as incomplete', async () => {
+    expect((await fixtureScanner({ keyExpires: '2000-01-01T00:00:00Z' }).scan(fixtureName, '1.0.0'))
+      .checks.registrySignature.status).toBe('unsupported');
+    for (const options of [{ keyExpires: 'not a date' }, { malformedKey: true }]) {
+      expect((await fixtureScanner(options).scan(fixtureName, '1.0.0')).checks.registrySignature.status).toBe('not-tested');
+    }
+  });
+
+  it('enforces compressed artifact limits even when a custom transport ignores them', async () => {
+    const version = '1.0.0';
+    const tarball = 'https://registry.npmjs.org/pt-fixture/-/pt-fixture-1.0.0.tgz';
+    const scanner = createScanner(async url => url === tarball ? Buffer.alloc(16 * 1024 * 1024 + 1)
+      : Buffer.from(JSON.stringify({ name: fixtureName, version, dist: { tarball } })));
+    await expect(scanner.scan(fixtureName, version)).rejects.toMatchObject({ code: 'LIMIT' });
+  });
+
+  it('uses legacy SHA-1 only when the published integrity field is absent', async () => {
+    const version = '1.0.0';
+    const archive = makeRelease(version);
+    const tarball = 'https://registry.npmjs.org/pt-fixture/-/pt-fixture-1.0.0.tgz';
+    const shasum = createHash('sha1').update(archive).digest('hex');
+    for (const value of [undefined, '', null, {}]) {
+      const scanner = createScanner(async url => url === tarball ? archive
+        : Buffer.from(JSON.stringify({ name: fixtureName, version, dist: { tarball, shasum, integrity: value } })));
+      const report = await scanner.scan(fixtureName, version);
+      expect(report.checks.integrity.status).toBe(value === undefined ? 'verified' : 'unsupported');
+      expect(report.checks.archive.status).toBe(value === undefined ? 'verified' : 'not-tested');
+    }
+  });
+
+  it.each([
+    [{ path: 'package/conflict' }, { path: 'package/conflict/child.txt' }],
+    [{ path: 'package/duplicate.txt' }, { path: 'package/duplicate.txt' }],
+    [{ path: 'package/solid-link', type: '1' }],
+    [{ path: 'package/sparse', type: 'S' }],
+    [{ path: '\ufeffpackage/ambiguous.txt' }],
+    [{ path: 'package/direction\u200f.txt' }],
+  ] as const)('rejects ambiguous or special archive entries %j', async (...entries) => {
+    const archive = makeRelease('1.0.0', [...entries]);
+    const result = await fixtureScanner({ archive }).scan(fixtureName, '1.0.0');
+    expect(result.checks.archive.status).toBe('failed');
+    expect(result.files).toEqual([]);
+  });
+
+  it('rejects a partial trailing tar block', async () => {
+    const archive = gzipSync(Buffer.concat([gunzipSync(makeRelease('1.0.0')), Buffer.alloc(1)]));
+    const result = await fixtureScanner({ archive }).scan(fixtureName, '1.0.0');
+    expect(result.checks.archive).toMatchObject({ status: 'failed', detail: expect.stringContaining('complete tar block') });
+  });
+
+  it('rejects an archive that exceeds the entry budget', async () => {
+    const entries = Array.from({ length: 3000 }, (_, index) => ({ path: 'package/empty-' + index }));
+    const result = await fixtureScanner({ archive: makeRelease('1.0.0', entries) }).scan(fixtureName, '1.0.0');
+    expect(result.checks.archive).toMatchObject({ status: 'failed', detail: expect.stringContaining('entry limit') });
+  });
+
+  it('inspects a package with lifecycle and entry point code without running either', async () => {
+    const folder = await mkdtemp(join(tmpdir(), 'packagetruth-no-execution-'));
+    try {
+      const marker = JSON.stringify(join(folder, 'ran.txt'));
+      const archive = makeRelease('1.0.0', [{ path: 'package/lifecycle.cjs',
+        data: 'require("node:fs").writeFileSync(' + marker + ', "fixture");' }],
+      { main: './lifecycle.cjs', scripts: { postinstall: 'node lifecycle.cjs' } });
+      const result = await fixtureScanner({ archive }).scan(fixtureName, '1.0.0');
+      expect(result.checks.manifest.status).toBe('verified');
+      expect(result.files.some(item => item.path === 'lifecycle.cjs')).toBe(true);
+      expect(result.findings.some(item => item.ruleId === 'PT-SCRIPT-001')).toBe(true);
+      expect(await readdir(folder)).toEqual([]);
+    } finally {
+      await rm(folder, { recursive: true, force: true });
+    }
+  });
   it('verifies exact bytes and cryptographic registry signature and records absent provenance', async () => {
     const result = await fixtureScanner().scan(fixtureName, '1.0.0');
     expect(result.checks.integrity.status).toBe('verified');

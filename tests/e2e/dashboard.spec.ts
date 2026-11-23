@@ -35,6 +35,14 @@ test('scan, browse files, download evidence, and reopen the report in history', 
   const evidence = await request.get(`/api/reports/${result.id}`);
   expect(evidence.headers()['content-disposition']).toContain('attachment');
   expect(await evidence.json()).toEqual(result.report);
+  for (const path of ['/history', '/evidence', '/evidence/' + result.id, '/reports/' + result.id, '/policies']) {
+    const denied = await request.get(path, { headers: { Host: 'example.invalid' } });
+    // App Router can stream its not-found response after sending the HTTP status.
+    const html = await denied.text();
+    expect(html).toContain('Page or report unavailable');
+    expect(html).not.toContain('lodash');
+    expect(html).not.toContain('Configure review policy');
+  }
 
   await page.getByRole('link', { name: 'Explore artifact evidence' }).click();
   await page.getByRole('textbox', { name: 'Filter file paths' }).fill('package.json');
