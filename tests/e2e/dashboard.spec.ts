@@ -29,9 +29,6 @@ test('scan, browse files, download evidence, and reopen the report in history', 
   expect(result.report.artifact.sha256).toBe(cli.artifact.sha256);
   await expect(page.getByRole('heading', { name: `Findings ${cli.findings.length}` })).toBeVisible();
   await expect(page.getByText(/are not a safety verdict/).first()).toBeVisible();
-  if (process.env.PACKAGETRUTH_CAPTURE === '1') {
-    await page.screenshot({ path: 'docs/screenshots/scan-report.png', animations: 'disabled', fullPage: true });
-  }
   const evidence = await request.get(`/api/reports/${result.id}`);
   expect(evidence.headers()['content-disposition']).toContain('attachment');
   expect(await evidence.json()).toEqual(result.report);
@@ -126,4 +123,8 @@ test('shows verified build identity from npm with matching CLI and downloaded JS
   expect(cli.checks.provenance).toEqual(check);
   const download = await request.get('/api/reports/' + result.id);
   expect((await download.json()).checks.provenance).toEqual(check);
+  if (process.env.PACKAGETRUTH_CAPTURE === '1') {
+    mkdirSync('docs/screenshots', { recursive: true });
+    await page.screenshot({ path: 'docs/screenshots/scan-report.png', animations: 'disabled', fullPage: true });
+  }
 });

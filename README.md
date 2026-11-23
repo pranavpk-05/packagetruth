@@ -1,89 +1,79 @@
 # PackageTruth
 
-PackageTruth collects reviewable evidence about an exact npm release. It checks downloaded bytes against the published digest, verifies supported npm registry signatures, inspects the archive without executing it, and compares what two releases ship. Static findings and verified checks do not establish whether a package is safe.
+PackageTruth verifies the bytes of an exact npm release and shows what changed between versions. Use the CLI for scriptable evidence, the local dashboard for review, and GitHub Actions to check changes in `package-lock.json`.
 
-## Features
+![PackageTruth landing page, captured from the production build](docs/screenshots/landing.png)
 
-- **Scanner** for public, exact npm releases, with archive inventory, manifest metadata, digests, npm registry signature verification, and Sigstore provenance for supported GitHub Actions builds.
-- **Release comparison** for added, removed and modified files, lifecycle hooks, executables, dependencies and selected manifest fields.
-- **CLI** with human-readable and JSON reports, severity thresholds and lockfile checks.
-- **Local dashboard** with scanning, comparisons, verification details, evidence filtering, JSON export, SQLite history, policy settings and methodology.
-- **GitHub Actions** for read-only review of changed public npm resolutions in `package-lock.json` and repository verification.
+## Quick start
 
-TypeScript and Node.js power the scanner and CLI. The dashboard uses Next.js App Router, React, Tailwind CSS and Node’s built-in SQLite driver. npm workspaces share the scanner and evidence model across all entry points.
-
-## Installation and CLI
-
-Use Node.js 24.15+ on the 24.x line or Node.js 26+, and npm. From the repository root:
+Use Node.js **24.15+ on the 24.x line**, or **26+**, with npm. Run these commands from the repository root in PowerShell, Command Prompt, Bash, or zsh. If PowerShell blocks the npm script shim, use `npm.cmd` in place of `npm`.
 
 ```sh
 npm ci --ignore-scripts
 npm run build:core
 npm exec -- packagetruth --help
-npm exec -- packagetruth scan lodash@4.17.21
-npm exec -- packagetruth scan semver@7.7.2 --json
-npm exec -- packagetruth scan @types/node@24.0.0 --json
+npm exec -- packagetruth scan "semver@7.7.2" --json
 npm exec -- packagetruth compare is-number 6.0.0 7.0.0 --json
-npm exec -- packagetruth lock-check base-lock.json head-lock.json --fail-on high
 ```
 
-The CLI also runs with `node packages/cli/dist/index.js`. Exit codes are **0** completed under the policy, **1** operational error or incomplete lockfile coverage, **2** invalid CLI or scan input, and **3** policy threshold reached. The default finding threshold is critical. Set `--fail-on off` to turn off severity-based exits. JSON reports go to stdout, and errors go to stderr.
+The `semver` scan demonstrates verified Sigstore provenance, including the source repository, commit, calling workflow and signing workflow. The comparison shows inventory, install hook, dependency and selected manifest changes. Use `node packages/cli/dist/index.js` to invoke the CLI directly.
 
-## Dashboard
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Completed under the configured policy |
+| 1 | Operational error or incomplete lockfile coverage |
+| 2 | Invalid arguments or scan input |
+| 3 | A finding met the configured severity threshold |
+
+JSON reports go to stdout. Errors go to stderr. The default threshold is `critical`. Set `--fail-on off` to disable severity-based exits.
+
+## Local dashboard
 
 ```sh
 npm run dev
 ```
 
-Open [the local dashboard](http://127.0.0.1:3000). To run the production build locally:
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). For the production build, run `npm run build` followed by `npm start`.
+
+Open **Package scan**, enter **semver** and **7.7.2**, then expand **Verified build identity**. The dashboard also provides release comparison, filtering, JSON downloads, scan history and policy settings. The [verified scan screenshot](docs/screenshots/scan-report.png) shows this flow against the public npm registry. Both screenshots were captured from the production build during the browser suite.
+
+The dashboard stores reports in `.data/packagetruth.sqlite` by default. Set `PACKAGETRUTH_DB` in your shell or in `apps/web/.env.local` to choose an absolute path. History retains up to 40 reports within a 64 MiB serialized report budget. See [.env.example](.env.example).
+
+## Dependency policy
+
+Try the same two lockfile inputs used by the manual GitHub Actions demo:
 
 ```sh
-npm run build
-npm start
+npm exec -- packagetruth lock-check fixtures/dependency-policy/base.lock.json fixtures/dependency-policy/allow.lock.json
+npm exec -- packagetruth lock-check fixtures/dependency-policy/base.lock.json fixtures/dependency-policy/block.lock.json
 ```
 
-The database defaults to `.data/packagetruth.sqlite`. Set `PACKAGETRUTH_DB` to an absolute path through the environment or an app-local Next.js env file. See [.env.example](.env.example). The dashboard uses the local policy to highlight evidence and stores up to 40 reports within a 64 MiB serialized report budget.
+The first command exits **0**. The second exits **3** with `PT-LOCK-001` because its synthetic lockfile checksum differs from the public release. Both scan the same npm artifact. See the [fixture inputs](fixtures/dependency-policy/README.md) and [hosted validation runbook](docs/github-actions.md).
 
-![PackageTruth landing page](docs/screenshots/landing.png)
+On pull requests that change the root `package-lock.json`, **Dependency evidence** checks out the base commit, verifies one bounded lockfile blob from the proposed revision, and uploads JSON evidence. It uses read-only repository access and installs only the base revision's tooling with scripts disabled. Configure the repository variables `PACKAGETRUTH_FAIL_ON` and `PACKAGETRUTH_FAIL_ON_INCOMPLETE` to set the policy. The defaults are `critical` and `false`. The dashboard policy applies only to local reports.
 
-[View the live npm scan report screenshot](docs/screenshots/scan-report.png).
+## Security and supported scope
 
-## GitHub dependency evidence
+- Bad artifact digests, failed signatures, missing attestations, and static indicators have separate results. The scanner uses direct public npm HTTPS requests, bounds archive handling and performs no package installation, execution or disk extraction during inspection.
+- Sigstore verification covers supported GitHub Actions SLSA v1 attestations. Check the authenticated source identity against your expectations. Provenance and static findings are evidence for review. They cannot establish package safety.
+- At **2027-02-21 00:00 UTC**, the reviewed trust snapshot reaches its verification deadline. Supported attestations that reach the trust check then report incomplete verification until the snapshot is refreshed. Other scan checks retain their separate results.
+- The dashboard is for loopback access. The current lockfile checker targets public npm artifact resolutions, and archive and static analysis have documented limits.
 
-The dependency workflow runs on pull requests that change the root `package-lock.json`. Its checked-out code and tooling dependencies come from the base commit. It requests the head commit and root tree through GitHub’s public API, checks the lockfile blob’s mode, length and Git digest, then treats its contents as JSON input. It uses read-only repository permission, persists no checkout credentials, and executes no code from the proposed lockfile. The job summary lists coverage and links through the workflow run to a JSON artifact with findings and review actions.
+Read the [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [provenance and trust maintenance](docs/provenance.md), and [detection rules](docs/detection-rules.md).
 
-Set repository variable `PACKAGETRUTH_FAIL_ON` to a severity or `off`. The default is `critical`. Missing or unsupported coverage is reported separately and is nonblocking by default. Set `PACKAGETRUTH_FAIL_ON_INCOMPLETE=true` to reject partial coverage. The public API can rate-limit unauthenticated requests. The workflow’s proposed definition is reviewable in the pull request and should be covered by repository review controls when used as a required gate.
-
-## Security model and limits
-
-The scanner makes direct requests only to the public npm registry, refuses redirects, and enforces size and time limits. It hashes the compressed bytes before inspecting a bounded decompressed stream. It never extracts an archive to disk or installs an inspected package. A registry checksum mismatch, unavailable checksum, signature failure and static finding have distinct evidence. Older releases may use weak SHA-1 checksums or keys unavailable for current verification.
-
-For supported npm SLSA v1 attestations, PackageTruth verifies public Sigstore signatures, certificates, and transparency evidence. It matches the signed package identifier and SHA-512 to the tarball and compares the signed source repository, commit, and workflow to the certificate. Compare the verified identity with your expected source. See [provenance verification and trust maintenance](docs/provenance.md).
-
-The tar parser accepts a constrained set of regular files and directories. Releases requiring extended headers or exceeding limits may yield partial evidence. Static rules use limited source samples and may miss harmful behavior or flag legitimate code. The dashboard is intended for loopback use on one machine and has no authentication.
-
-See the [architecture](docs/architecture.md), [threat model](docs/threat-model.md), [rule catalog](docs/detection-rules.md), and [npm’s registry signature format](https://docs.npmjs.com/about-registry-signatures/).
-
-## Verification
+## Development checks
 
 ```sh
 npm run typecheck
 npm run lint
-npm run test:unit
-npm run test:integration
+npm test
 npm run build
 npm exec -- playwright install chromium
 npm run test:e2e
 ```
 
-Vitest uses deterministic inert archives and local transport responses. Playwright exercises the production dashboard against live public npm releases and checks CLI and API evidence parity.
+On supported Linux runners, use `npm exec -- playwright install --with-deps chromium` to install browser system dependencies. The default Vitest suite uses local fixtures. The browser suite exercises the production server and requires public npm access. See [Contributing](CONTRIBUTING.md) for live provenance and screenshot commands.
 
-Set `PACKAGETRUTH_LIVE_NPM=1` and run `npm run test:integration` to include a live provenance compatibility matrix. Without the flag, the offline suite verifies a captured real npm bundle and tarball.
+Planned work includes expected-source policies, bounded PAX archive support, and per-dependency release comparisons during lockfile review.
 
-## Roadmap
-
-1. Add optional expected-source policies and extend provenance coverage to more CI and transparency log profiles.
-2. Extend archive compatibility with bounded PAX handling and additional compatibility fixtures.
-3. Add a lockfile review mode that compares previous and proposed release artifacts for each changed dependency.
-
-MIT licensed. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+[Release readiness](docs/release-readiness.md) · [Changelog](CHANGELOG.md) · [Contributing](CONTRIBUTING.md) · [Security reporting](SECURITY.md) · [MIT license](LICENSE)

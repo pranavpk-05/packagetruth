@@ -15,7 +15,8 @@ flowchart LR
 - For advertised attestations, the scanner uses a bounded exact-release npm endpoint and the official Sigstore libraries with a bundled TUF-authenticated trust snapshot. The report includes authenticated source and workflow claims only when they agree with the downloaded tarball and the signing certificate. See [provenance verification](provenance.md).
 - `packages/cli` formats reports, returns policy exit codes and checks changed npm lockfile resolutions. It verifies a lockfile digest against calculated artifact digests after registry checksum verification.
 - `apps/web` reuses the scanner on Node.js. SQLite stores complete report JSON and policy settings. Reports are versioned, paginated in the views and downloadable as JSON. The local history holds up to 40 reports and 64 MiB of serialized report data. SQLite’s file allocation and WAL can differ from that logical budget.
-- `fixtures` builds deterministic inert archives. Integration tests supply local metadata, tarballs and test signing keys through a transport seam. Production callers use the hard-coded npm registry.
+- `fixtures` contains generated inert archives, a captured public release with its signed attestation, and fixed lockfile cases. Offline integration tests supply metadata, tarballs and test signing keys through a transport seam. Production callers fetch from the fixed public npm hostname.
+- The dependency workflow invokes `scripts/ci/dependency-evidence.sh` for both PR lockfile review and manual policy demonstrations. Both paths use the same CLI, exit-code policy and JSON evidence. Only the PR path requests a proposed GitHub blob.
 
 ## Local API
 
@@ -28,7 +29,7 @@ Send JSON to the loopback dashboard. Scan and comparison return HTTP 201 with `{
 | GET | `/api/reports/{id}` | Report JSON attachment |
 | PUT | `/api/policy` | `{"threshold":"medium"}` |
 
-Browser requests must originate from the same loopback host. The API limits active scans and recent submissions in one server process.
+Stored report pages and APIs restrict the Host header to loopback names. API calls with an Origin must match the local host, and cross-site browser requests are rejected. Nonbrowser tools can use the loopback API without an Origin. The per-process budget limits active request readers, concurrent scans and recent submissions.
 
 ## Landing artwork
 

@@ -1,15 +1,20 @@
 # Changelog
 
-## Unreleased
+## v0.1.0
 
-- Harden signature, provenance, archive, transport, dashboard and GitHub lockfile boundaries, with regression coverage documented in the security audit.
-- Verify supported npm SLSA v1 Sigstore attestations against the downloaded tarball and Fulcio-authenticated GitHub source and workflow identities.
-- Add provenance evidence and explicit unavailable, unsupported, incomplete and invalid results to the CLI, API and dashboard.
-- Add offline signed-release fixtures and an opt-in live verification matrix. The Sigstore verifier requires Node.js 24.15+ on the 24.x line or Node.js 26+.
+Initial public release candidate. Publication is pending.
 
-## 0.1.0
+### Added
 
-- Added npm artifact verification, bounded archive inspection, release diffs and structured evidence.
-- Added registry ECDSA signature verification and explicit provenance availability and verification status.
-- Added an executable CLI, local Next.js dashboard, SQLite history and configurable review thresholds.
-- Added read-only dependency review and quality workflows, deterministic scanner tests and production-browser coverage.
+- Verify exact public npm artifacts against published integrity digests and supported npm ECDSA signatures.
+- Inspect bounded tar streams, report per-file digests and manifest evidence, and compare file, install hook and dependency changes between versions.
+- Verify supported Sigstore SLSA v1 provenance, including tarball identity and Fulcio-authenticated GitHub source and workflow claims.
+- Provide human-readable and JSON CLI reports, severity thresholds, and lockfile evidence.
+- Provide a loopback dashboard with artifact evidence, release comparisons, SQLite history, JSON export and local review policy.
+- Add read-only dependency evidence and quality workflows, plus manual policy demonstration scenarios with fixture-backed regressions.
+
+### Security and compatibility
+
+- Apply registry destination and size limits, reject ambiguous archives and contradictory transparency proof fields, and check the trust snapshot digest and review deadline.
+- Distinguish invalid, absent, unsupported and incomplete verification. Keep linked and bundled lockfile resolutions visible as incomplete coverage.
+- Support Node.js 24.15+ on the 24.x line or Node.js 26+. See [release readiness](docs/release-readiness.md) for tested environments and pending hosted checks.

@@ -1,6 +1,6 @@
 # Security policy
 
-Report suspected PackageTruth vulnerabilities privately using the repository’s GitHub private vulnerability reporting feature when available. Share the affected version, impact and a minimal inert example. Keep credentials and private package data out of reports.
+Report suspected PackageTruth vulnerabilities through **Security → Advisories → Report a vulnerability** once private vulnerability reporting is enabled on the public repository. Share the affected version, impact and a minimal inert example. Keep credentials and private package data out of reports. If the reporting form is unavailable, use an agreed private channel with the maintainers and keep vulnerability details out of public issues.
 
 PackageTruth analyzes npm tarballs in memory without installing, importing, extracting or executing them. The scanner makes bounded, deadline-controlled HTTPS requests to the public npm registry and rejects redirects and incomplete responses. The dashboard binds to loopback and restricts both API calls and stored-report pages to local Host values. Dashboard data is accessible to other processes on the same machine. Keep the listener private.
 
