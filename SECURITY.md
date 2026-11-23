@@ -4,4 +4,4 @@ Report suspected PackageTruth vulnerabilities privately using the repository’s
 
 PackageTruth analyzes npm tarballs without installing, importing or executing them. It makes direct requests to the public npm registry. The local dashboard binds to loopback and has no accounts or authentication. Avoid exposing it through a public reverse proxy.
 
-Findings are review evidence. Matching published digests establish byte consistency, and supported signatures verify signed registry metadata. Static checks cannot establish whether a package is safe. See [the threat model](docs/threat-model.md).
+Findings are review evidence. Matching published digests establish byte consistency, supported registry signatures verify signed metadata, and verified provenance authenticates the attested build identity. Compare that identity with the expected source. Static checks cannot establish whether a package is safe. See [the threat model](docs/threat-model.md) and [provenance limitations](docs/provenance.md).

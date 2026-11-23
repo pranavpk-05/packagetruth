@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import { compare, parseSpec, scan, ScanError } from '@packagetruth/scanner';
-import { defaultPolicy, displayEvidence, meetsPolicy, severities, verificationLabels } from '@packagetruth/shared';
-import type { Report, Severity } from '@packagetruth/shared';
+import { defaultPolicy, displayEvidence, meetsPolicy, provenanceEvidenceLabels, provenanceLabels,
+  severities, verificationLabels } from '@packagetruth/shared';
+import type { ProvenanceEvidence, Report, Severity } from '@packagetruth/shared';
 import { checkLock } from './lock.js';
 
 const help = `PackageTruth · npm release evidence
@@ -23,7 +24,15 @@ function printReport(report: Report): void {
   console.log(`PackageTruth · ${report.package} ${versions}`);
   for (const scanned of report.kind === 'scan' ? [report] : [report.before, report.after]) {
     for (const [key, check] of Object.entries(scanned.checks)) {
-      console.log(`  ${scanned.version} ${key}: ${verificationLabels[check.status]} · ${displayEvidence(check.detail)}`);
+      const labels = key === 'provenance' ? provenanceLabels : verificationLabels;
+      console.log(`  ${scanned.version} ${key}: ${labels[check.status]} · ${displayEvidence(check.detail)}`);
+    }
+    if (scanned.checks.provenance.evidence) {
+      for (const [key, value] of Object.entries(scanned.checks.provenance.evidence)) {
+        if (value !== undefined) {
+          console.log(`    ${provenanceEvidenceLabels[key as keyof ProvenanceEvidence]}: ${displayEvidence(value)}`);
+        }
+      }
     }
   }
   if (report.kind === 'comparison' && report.changes) {

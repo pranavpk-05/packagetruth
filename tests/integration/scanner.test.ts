@@ -20,10 +20,10 @@ describe('release inspection with deterministic npm responses', () => {
     expect(result.manifest).toBeNull();
     expect(result.findings[0]).toMatchObject({ severity: 'critical', ruleId: 'PT-INTEGRITY-001' });
   });
-  it('distinguishes a bad registry signature from advertised but unverified provenance', async () => {
+  it('reports a bad registry signature and an invalid attestation location separately', async () => {
     const result = await fixtureScanner({ badSignature: true, attestations: true }).scan(fixtureName, '1.0.0');
     expect(result.checks.registrySignature.status).toBe('failed');
-    expect(result.checks.provenance.status).toBe('unsupported');
+    expect(result.checks.provenance).toMatchObject({ status: 'failed', detail: expect.stringContaining('attestation URL') });
     expect(result.checks.integrity.status).toBe('verified');
   });
   it('distinguishes an absent registry signature and unsupported published checksum', async () => {

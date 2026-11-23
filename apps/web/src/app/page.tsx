@@ -4,7 +4,7 @@ import { ArrowDown, ArrowRight, Archive, Fingerprint, GitCompareArrows, ShieldCh
 const capabilities = [
   { icon: Fingerprint, title: 'Artifact integrity', description: 'Match the downloaded tarball against the exact release’s published npm digest.' },
   { icon: GitCompareArrows, title: 'Release comparison', description: 'Track added, modified and removed files, install hooks, and dependency changes.' },
-  { icon: ShieldCheck, title: 'Verification status', description: 'See registry signature verification and the availability of provenance evidence.' },
+  { icon: ShieldCheck, title: 'Verification status', description: 'Review npm registry signatures and verified build provenance for supported releases.' },
 ];
 
 export default function Home() {

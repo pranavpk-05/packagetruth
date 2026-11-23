@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { ArrowLeft, ArrowRight, Download, FileSearch, ShieldAlert } from 'lucide-react';
-import { displayEvidence, meetsPolicy, severities, verificationLabels } from '@packagetruth/shared';
-import type { Check, Report, ScanReport, Severity } from '@packagetruth/shared';
+import { displayEvidence, meetsPolicy, provenanceEvidenceLabels, provenanceLabels, severities,
+  verificationLabels } from '@packagetruth/shared';
+import type { Check, ProvenanceEvidence, Report, ScanReport, Severity } from '@packagetruth/shared';
 import { Heading } from './heading';
 
 export const labels = { integrity: 'Artifact integrity', registrySignature: 'Registry signature', provenance: 'Provenance',
@@ -13,11 +14,23 @@ export function DownloadLink({ id }: { id: string }) {
 }
 
 export function CheckList({ report }: { report: ScanReport }) {
+  const { provenance } = report.checks;
   return <div className="check-panel">
     <h3><code>{report.version}</code></h3>
-    <dl>{(Object.entries(report.checks) as [keyof typeof labels, Check][]).map(([key, check]) =>
-      <div key={key}><dt>{labels[key]}<span className={`status status-${check.status}`}>{verificationLabels[check.status]}</span></dt>
-        <dd>{displayEvidence(check.detail)}</dd></div>)}</dl>
+    <dl>{(Object.entries(report.checks) as [keyof typeof labels, Check][]).map(([key, check]) => {
+      const statusLabels = key === 'provenance' ? provenanceLabels : verificationLabels;
+      return <div key={key}><dt>{labels[key]}<span className={`status status-${check.status}`}>{statusLabels[check.status]}</span></dt>
+        <dd>{displayEvidence(check.detail)}
+          {key === 'provenance' && provenance.status === 'verified' && provenance.evidence &&
+            <details className="provenance-identity">
+              <summary>Verified build identity</summary>
+              <dl>{(Object.entries(provenanceEvidenceLabels) as [keyof ProvenanceEvidence, string][]).map(([field, label]) => {
+                const value = provenance.evidence?.[field];
+                return value ? <div key={field}><dt>{label}</dt><dd><code>{displayEvidence(value)}</code></dd></div> : null;
+              })}</dl>
+            </details>}
+        </dd></div>;
+    })}</dl>
   </div>;
 }
 

@@ -1,6 +1,7 @@
 import type { Finding, Severity } from '@packagetruth/shared';
 
 const rules = {
+  'PT-PROVENANCE-001': ['high', 'The advertised npm provenance failed authenticity, format or identity checks.', 'Investigate the release and independently confirm the expected repository, revision and workflow.'],
   'PT-INTEGRITY-001': ['critical', 'The downloaded artifact differs from the published checksum.', 'Reject these bytes and verify registry metadata through a trusted connection.'],
   'PT-INTEGRITY-002': ['medium', 'A supported published checksum was unavailable.', 'Review the release manually before relying on the artifact.'],
   'PT-SIGNATURE-001': ['high', 'The npm registry signature failed verification.', 'Investigate the registry signing keys and the release before use.'],

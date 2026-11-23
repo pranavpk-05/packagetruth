@@ -5,6 +5,24 @@ export interface Check {
   status: VerificationStatus;
   detail: string;
 }
+export interface ProvenanceEvidence {
+  predicateType: string;
+  subject: string;
+  sha512: string;
+  issuer: string;
+  repository: string;
+  repositoryId?: string;
+  commit: string;
+  ref: string;
+  buildWorkflow: string;
+  buildWorkflowCommit?: string;
+  signingWorkflow: string;
+  signingWorkflowCommit?: string;
+  trustRoot: string;
+}
+export interface ProvenanceCheck extends Check {
+  evidence?: ProvenanceEvidence;
+}
 export interface Finding {
   ruleId: string;
   severity: Severity;
@@ -37,7 +55,7 @@ export interface ScanReport {
   startedAt: string;
   completedAt: string;
   artifact: { url: string; bytes: number; sha256: string; digests: ArtifactDigests; expectedIntegrity: string | null };
-  checks: { integrity: Check; registrySignature: Check; provenance: Check; archive: Check; manifest: Check };
+  checks: { integrity: Check; registrySignature: Check; provenance: ProvenanceCheck; archive: Check; manifest: Check };
   manifest: Manifest | null;
   files: ArtifactFile[];
   findings: Finding[];
@@ -65,6 +83,16 @@ export const severities: readonly Severity[] = ['info', 'low', 'medium', 'high',
 export const verificationLabels: Record<VerificationStatus, string> = {
   verified: 'Verified', failed: 'Failed', absent: 'Not available',
   unsupported: 'Unsupported', 'not-tested': 'Not tested',
+};
+export const provenanceLabels: Record<VerificationStatus, string> = {
+  verified: 'Verified provenance', failed: 'Invalid provenance', absent: 'Provenance unavailable',
+  unsupported: 'Unsupported attestation', 'not-tested': 'Verification incomplete',
+};
+export const provenanceEvidenceLabels: Record<keyof ProvenanceEvidence, string> = {
+  repository: 'Source repository', repositoryId: 'Repository ID', commit: 'Source commit', ref: 'Source ref',
+  buildWorkflow: 'Build workflow', buildWorkflowCommit: 'Build workflow commit',
+  signingWorkflow: 'Signing workflow', signingWorkflowCommit: 'Signing workflow commit', issuer: 'OIDC issuer',
+  subject: 'Attested package', sha512: 'Attested SHA-512', predicateType: 'Predicate type', trustRoot: 'Trust snapshot',
 };
 export const dependencyGroups: readonly DependencyGroup[] = [
   'dependencies', 'optionalDependencies', 'peerDependencies', 'devDependencies',

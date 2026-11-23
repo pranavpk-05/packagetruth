@@ -12,6 +12,7 @@ flowchart LR
 
 - `packages/shared` defines report version 1, finding types, severity order and threshold evaluation.
 - `packages/scanner` validates identifiers, fetches metadata for one exact version and restricts tarball URLs to the matching public npm path. It collects compressed bytes under a hard cap, hashes them, and streams a verified artifact through the gzip and tar readers. Evidence includes compressed digests, per-file SHA-256, selected manifest fields and static findings.
+- For advertised attestations, the scanner uses a bounded exact-release npm endpoint and the official Sigstore libraries with a bundled TUF-authenticated trust snapshot. The report includes authenticated source and workflow claims only when they agree with the downloaded tarball and the signing certificate. See [provenance verification](provenance.md).
 - `packages/cli` formats reports, returns policy exit codes and checks changed npm lockfile resolutions. It verifies a lockfile digest against calculated artifact digests after registry checksum verification.
 - `apps/web` reuses the scanner on Node.js. SQLite stores complete report JSON and policy settings. Reports are versioned, paginated in the views and downloadable as JSON. The local history holds up to 40 reports and 64 MiB of serialized report data. SQLite’s file allocation and WAL can differ from that logical budget.
 - `fixtures` builds deterministic inert archives. Integration tests supply local metadata, tarballs and test signing keys through a transport seam. Production callers use the hard-coded npm registry.

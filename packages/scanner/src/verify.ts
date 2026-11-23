@@ -85,9 +85,3 @@ export async function verifyRegistrySignature(
     ? { status: 'failed', detail: 'No signature matched the signed release tuple with the applicable npm key.' }
     : { status: 'unsupported', detail: 'No supported, currently valid npm signing key matched this release.' };
 }
-
-export function provenanceStatus(attestations: unknown): Check {
-  return attestations === undefined || attestations === null
-    ? { status: 'absent', detail: 'The npm release metadata advertises no provenance attestation.' }
-    : { status: 'unsupported', detail: 'The registry advertises attestations. This scanner does not verify Sigstore bundles.' };
-}

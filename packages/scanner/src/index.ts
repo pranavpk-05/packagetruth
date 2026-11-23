@@ -3,10 +3,11 @@ import type { Check, ComparisonReport, Finding, ScanReport } from '@packagetruth
 import { inspectArchive } from './archive.js';
 import { record, ScanError, validateName, validateVersion } from './input.js';
 import { parseManifest } from './manifest.js';
+import { pendingProvenance, verifyProvenance } from './provenance.js';
 import { artifactUrl, download, limits, metadataUrl, readJson } from './registry.js';
 import type { Transport } from './registry.js';
 import { finding, lifecycle } from './rules.js';
-import { artifactDigests, provenanceStatus, verifyIntegrity, verifyRegistrySignature } from './verify.js';
+import { artifactDigests, verifyIntegrity, verifyRegistrySignature } from './verify.js';
 
 export { parseSpec, ScanError, validateName, validateVersion } from './input.js';
 export { artifactUrl } from './registry.js';
@@ -15,7 +16,7 @@ export { verifyIntegrity } from './verify.js';
 const limitations = [
   'Static indicators can miss harmful behavior and can match legitimate code. Findings and their absence are not a safety verdict.',
   'Code indicators inspect only the first 128 KiB of supported source files. No code is executed.',
-  'Sigstore provenance verification is unsupported. Registry signatures bind npm metadata to a digest, independently of provenance.',
+  'Provenance verifies the attested GitHub build identity against the public Sigstore trust snapshot. Compare that identity with the repository and workflow you expect.',
   'Archive limits and unsupported formats can prevent inspection.',
 ];
 
@@ -42,7 +43,7 @@ export function createScanner(transport: Transport = download) {
     const digests = artifactDigests(artifact);
     const integrity = verifyIntegrity(digests, published, dist.shasum);
     const checks: ScanReport['checks'] = {
-      integrity, registrySignature: skipped, provenance: provenanceStatus(dist.attestations), archive: skipped,
+      integrity, registrySignature: skipped, provenance: pendingProvenance(dist.attestations), archive: skipped,
       manifest: { status: 'not-tested', detail: 'Manifest validation requires a completed archive inspection.' },
     };
     const report: ScanReport = {
@@ -54,7 +55,13 @@ export function createScanner(transport: Transport = download) {
     if (integrity.status !== 'verified') {
       report.findings.push(finding(integrity.status === 'failed' ? 'PT-INTEGRITY-001' : 'PT-INTEGRITY-002', '(tarball)', integrity.detail));
     } else {
-      checks.registrySignature = await verifyRegistrySignature(name, version, published, dist.signatures, transport);
+      [checks.registrySignature, checks.provenance] = await Promise.all([
+        verifyRegistrySignature(name, version, published, dist.signatures, transport),
+        verifyProvenance(name, version, digests, dist.attestations, transport),
+      ]);
+      if (checks.provenance.status === 'failed') {
+        report.findings.push(finding('PT-PROVENANCE-001', '(provenance)', checks.provenance.detail));
+      }
       if (checks.registrySignature.status === 'failed') {
         report.findings.push(finding('PT-SIGNATURE-001', '(registry)', checks.registrySignature.detail));
       }
@@ -106,7 +113,7 @@ export function createScanner(transport: Transport = download) {
     const before = await scan(name, oldVersion);
     const after = await scan(name, newVersion);
     const findings = [
-      ...before.findings.filter(item => /^(PT-INTEGRITY|PT-ARCHIVE|PT-SIGNATURE|PT-MANIFEST)-/.test(item.ruleId))
+      ...before.findings.filter(item => /^(PT-INTEGRITY|PT-ARCHIVE|PT-SIGNATURE|PT-PROVENANCE|PT-MANIFEST)-/.test(item.ruleId))
         .map(item => ({ ...item, evidence: `[${oldVersion}] ${item.evidence}` })),
       ...after.findings,
     ];

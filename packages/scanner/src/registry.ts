@@ -4,7 +4,7 @@ import { ScanError } from './input.js';
 const registry = 'https://registry.npmjs.org';
 export const registryKeysUrl = `${registry}/-/npm/v1/keys`;
 export const limits = {
-  metadata: 1_048_576, compressed: 16 * 1_048_576, expanded: 64 * 1_048_576,
+  metadata: 1_048_576, attestations: 512 * 1024, compressed: 16 * 1_048_576, expanded: 64 * 1_048_576,
   file: 16 * 1_048_576, files: 3000, manifest: 256 * 1024, text: 128 * 1024,
   requestMs: 15_000,
 } as const;
@@ -13,6 +13,16 @@ export type Transport = (url: string, maxBytes: number) => Promise<Buffer>;
 
 export function metadataUrl(name: string, version: string): string {
   return `${registry}/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
+}
+
+export function attestationUrl(raw: unknown, name: string, version: string): string | undefined {
+  const base = registry + '/-/npm/v1/attestations/';
+  const release = name.replace('/', '%2f') + '@' + version;
+  if (typeof raw !== 'string' || ![
+    release, release.replace('%2f', '%2F'), release.replaceAll('+', '%2B'),
+    release.replace('%2f', '%2F').replaceAll('+', '%2B'),
+  ].some(path => raw === base + path)) return undefined;
+  return base + release;
 }
 
 export function artifactUrl(raw: unknown, name: string, version: string): string {

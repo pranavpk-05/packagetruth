@@ -95,3 +95,27 @@ test('mobile navigation and workspace fit without horizontal scrolling', async (
   await page.getByRole('link', { name: 'Evidence explorer' }).click();
   await expect(page.getByRole('heading', { name: 'Browse evidence' })).toBeVisible();
 });
+
+test('shows verified build identity from npm with matching CLI and downloaded JSON evidence', async ({ page, request }) => {
+  await page.goto('/scan');
+  await page.getByLabel('Package name').fill('semver');
+  await page.getByLabel('Exact version').fill('7.7.2');
+  const submitted = page.waitForResponse(response => response.url().endsWith('/api/scan') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Run scan' }).click();
+  const response = await submitted;
+  expect(response.status()).toBe(201);
+  const result: { id: string; report: ScanReport } = await response.json();
+  const check = result.report.checks.provenance;
+  expect(check).toMatchObject({ status: 'verified', evidence: { repository: 'https://github.com/npm/node-semver',
+    commit: '281055e7716ef0415a8826972471331989ede58c' } });
+  await expect(page.getByText('Verified provenance', { exact: true })).toBeVisible();
+  await page.getByText('Verified build identity', { exact: true }).click();
+  await expect(page.getByText('Source repository', { exact: true })).toBeVisible();
+  await expect(page.getByText('https://github.com/npm/node-semver', { exact: true })).toBeVisible();
+  await expect(page.getByText('Signing workflow', { exact: true })).toBeVisible();
+  const cli: ScanReport = JSON.parse(execFileSync(process.execPath, ['packages/cli/dist/index.js', 'scan', 'semver@7.7.2', '--json'],
+    { encoding: 'utf8', timeout: 45_000 }));
+  expect(cli.checks.provenance).toEqual(check);
+  const download = await request.get('/api/reports/' + result.id);
+  expect((await download.json()).checks.provenance).toEqual(check);
+});
